@@ -1,5 +1,22 @@
 # TMPUD
 
+
+If you use this code, please cite our following paper
+
+@inproceedings{ding2020task,
+  title={Task-motion planning for safe and efficient urban driving},
+  author={Ding, Yan and Zhang, Xiaohan and Zhan, Xingyue and Zhang, Shiqi},
+  booktitle={2020 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)},
+  pages={2119--2125},
+  organization={IEEE}
+}
+
+## Environment
+* install CARLA (0.9.10.1)
+* ubuntu (18.04)
+* python (3.5)
+
+
 ## Config environment 
 ### config.py
 #### function
