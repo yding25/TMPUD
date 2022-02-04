@@ -235,6 +235,7 @@ def game_loop(args):
                 # -----------------------------------------
                 curr_lane = X[i][2]
                 p_risk = fuc_risk(i, car_ego, world, curr_lane)
+
                 log.write('current lane is %d\n' % curr_lane)
                 log.write('p_risk is %3.3f if our ego car merges lane\n' % p_risk)
                 log.flush()
@@ -294,18 +295,20 @@ def game_loop(args):
                     # -----------------------------------------
                     # update the risk value of target lane in lanes_risk.txt
                     # -----------------------------------------
-                    with open(address1 + 'interaction/lanes_risk.txt', 'r+') as f:  # read original lane risk
+                    with open(address1 + 'interaction/lanes_risk.txt', 'r') as f:  # read original lane risk
                         lanes_risk = [line.rstrip() for line in f]
                     f.close()
 
                     init_risk = int(lanes_risk[int(X[i][2] - 1) * 12 + 6 - 1])
                     updated_risk = int(p_risk * 100)
-                    lanes_risk[init_risk] = updated_risk
+                    lanes_risk[int(X[i][2] - 1) * 12 + 6 - 1] = updated_risk
 
-                    f = open(address1 + 'interaction/lanes_risk.txt', 'w+')  # write updated lane risk
+                    f = open(address1 + 'interaction/lanes_risk.txt', 'w')  # write updated lane risk
                     for item in lanes_risk:
                         f.write('%s\n' % str(item))
+                    f.flush()
                     f.close()
+
                     log.write('update risk value of lane %d\n' % int(curr_lane))
                     log.write('original value is %d, now it is %d!\n' % (init_risk, updated_risk))
                     log.flush()
@@ -325,7 +328,7 @@ def game_loop(args):
 
                     X = readX()  # read X again
                     # -----------------------------------------
-                    # if X changes
+                    # if X changes, it means our ego car finds a new task plan
                     # -----------------------------------------
                     if not (X == X_init):
                         i = 0
@@ -337,352 +340,272 @@ def game_loop(args):
                         # -----------------------------------------
                         behavior = 0  # temporaily do not change
 
-                    log.write('do task task planning again, start and dest lanes are %s and %s, respectively\n' % (source, dest))
+                    log.write('do task task planning again, start and dest lanes are %s and %s, respectively\n' % (
+                        source, dest))
                     log.write('Here to update coordinate for motion planner (X)\n')
                     log.flush()
 
         log.write('task and motion planning is done!\n\n\n\n')
         log.flush()
     finally:
-        client.stop_recorder()
         for actor in actor_list:  # delete our ego car
             actor.destroy()
+        client.stop_recorder()
         print("ALL cleaned up!")
+
+
+# -----------------------------------------
+# Compute distance between two points
+# -----------------------------------------
+def distance(locA_x, locA_y, locB_x, locB_y):
+    return math.sqrt((locA_x - locB_x) ** 2 + (locA_y - locB_y) ** 2)
 
 
 # -----------------------------------------
 # TBD
 # -----------------------------------------
 def fuc_risk(action_index, car_ego, world, curr_lane):
-    alpha = 1.0 # risk model中某个系数
+    # -----------------------------------------
+    # sub function
+    # -----------------------------------------
+    def func_compute_risk(future_traj_ego, future_traj_other, num_waypoints):
+        pool_p1_value = []
+
+        for i in range(1, num_waypoints):
+            # -----------------------------------------
+            # state of our ego car
+            # -----------------------------------------
+            p_ox = future_traj_ego[i][0]
+            p_oy = future_traj_ego[i][1]
+            v_o = future_traj_ego[i][2]
+            theta_o = future_traj_ego[i][3]
+            acceleration_o = future_traj_ego[i][4]
+            angular_velocity_o = future_traj_ego[i][5]
+
+            # -----------------------------------------
+            # state of "other car"
+            # -----------------------------------------
+            p_jx = future_traj_other[i][0]
+            p_jy = future_traj_other[i][1]
+            v_j = future_traj_other[i][2]
+            theta_j = future_traj_other[i][3]
+            acceleration_j = future_traj_other[i][4]
+            angular_velocity_j = future_traj_other[i][5]
+
+            # -----------------------------------------
+            # x_o
+            # TBD
+            # -----------------------------------------
+            fi = D - (p_ox - p_jx) ** 2 - (p_oy - p_jy) ** 2 - alpha * (
+                    (p_ox - p_jx) * (v_o * math.cos(theta_o) - v_j * math.cos(theta_j)) + (p_oy - p_jy) * (
+                    v_o * math.sin(theta_o) - v_j * math.sin(theta_j))) / (
+                         ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
+
+            derivation_pox = -2 * (p_ox - p_jx) - alpha * (
+                    -v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) / (
+                                     (p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5 + alpha * (
+                                     (p_ox - p_jx) * (
+                                     (p_ox - p_jx) * (
+                                     -v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) + (
+                                             p_oy - p_jy) * (
+                                             -v_j * math.sin(theta_j) + v_o * math.sin(theta_o)))) / (
+                                     ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 1.5)
+
+            derivation_poy = -2 * (p_oy - p_jy) - alpha * (
+                    -v_j * math.sin(theta_j) + v_o * math.sin(theta_o)) / (
+                                     (p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5 + alpha * (
+                                     (p_oy - p_jy) * (
+                                     (p_ox - p_jx) * (
+                                     -v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) + (
+                                             p_oy - p_jy) * (
+                                             -v_j * math.sin(theta_j) + v_o * math.sin(theta_o)))) / (
+                                     ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 1.5)
+
+            derivation_vox = -alpha * (
+                    (p_ox - p_jx) * math.cos(theta_o) + (p_oy - p_jy) * math.sin(theta_o)) / (
+                                     ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
+
+            derivation_ao = -alpha * (
+                    -v_o * (p_ox - p_jx) * math.sin(theta_o) + v_o * (p_oy - p_jy) * math.cos(theta_o)) / (
+                                    ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
+
+            derivation_o = [derivation_pox, derivation_poy, derivation_vox, derivation_ao]
+            f_xo = [v_o * math.cos(theta_o), v_o * math.sin(theta_o), 0, 0]
+            f_xo = np.transpose(f_xo)
+            B = [[0, 0],
+                 [0, 0],
+                 [1, 0],
+                 [0, 1]]
+            u_o = [acceleration_o, angular_velocity_o]
+            u_o = np.transpose(u_o)
+            derivation_ego_result = np.dot(derivation_o, (f_xo + np.dot(B, u_o)))
+
+            # -----------------------------------------
+            # x_j
+            # TBD
+            # -----------------------------------------
+            derivation_pjx = 2 * (p_ox - p_jx) - alpha * (v_j * math.cos(theta_j) - v_o * math.cos(theta_o)) / (
+                    (p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5 - alpha * ((p_ox - p_jx) * (
+                    (p_ox - p_jx) * (-v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) + (p_oy - p_jy) * (
+                    -v_j * math.sin(theta_j) + v_o * math.sin(theta_o)))) / (
+                                     ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 1.5)
+
+            derivation_pjy = 2 * (p_oy - p_jy) - alpha * (v_j * math.sin(theta_j) - v_o * math.sin(theta_o)) / (
+                    (p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5 - alpha * ((p_oy - p_jy) * (
+                    (p_ox - p_jx) * (-v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) + (p_oy - p_jy) * (
+                    -v_j * math.sin(theta_j) + v_o * math.sin(theta_o)))) / (
+                                     ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 1.5)
+
+            derivation_vjx = -alpha * (
+                    -(p_ox - p_jx) * math.cos(theta_j) - (p_oy - p_jy) * math.sin(theta_j)) / (
+                                     ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
+
+            derivation_aj = -alpha * (
+                    v_j * (p_ox - p_jx) * math.sin(theta_j) - v_j * (p_oy - p_jy) * math.cos(theta_j)) / (
+                                    ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
+
+            derivation_j = [derivation_pjx, derivation_pjy, derivation_vjx, derivation_aj]
+
+            f_xj = [v_j * math.cos(theta_j), v_j * math.sin(theta_j), 0, 0]
+            f_xj = np.transpose(f_xj)
+            u_j = [acceleration_j, angular_velocity_j]
+            u_j = np.transpose(u_j)
+            derivation_other_result = np.dot(derivation_j, (f_xj + np.dot(B, u_j)))
+            derivation_fi = derivation_ego_result + derivation_other_result
+            k = np.dot(derivation_o, B)
+            k1 = k[0]
+            k2 = k[1]
+            m = -derivation_other_result - np.dot(derivation_o, f_xo)
+
+            # -----------------------------------------
+            # solver
+            # TBD
+            # -----------------------------------------
+            if fi > 0 and derivation_fi > -0.5:
+                right_number = 0
+                answer_v = 0
+                answer_theta = 0
+                wrong_number = 0
+                for r in range(1000):  # sampling-based
+                    answer_derivation_v = random.uniform(0, 10)
+                    answer_derivation_theta = random.uniform(-0.01, 0.01)
+                    if k1 * answer_derivation_v + k2 * answer_derivation_theta < m:
+                        right_number = right_number + 1
+                    else:
+                        wrong_number = wrong_number + 1
+                p1_value = wrong_number / 1000.0
+            else:
+                p1_value = 0
+            pool_p1_value.append(p1_value)
+        return pool_p1_value
+
+    # -----------------------------------------
+    # parameters
+    # TBD
+    # -----------------------------------------
+    alpha = 1.0  # risk model中某个系数
     D = 20  # risk model中最小的距离阈值
     D = D * D
-    vehicles = world.get_actors().filter('vehicle.*')  # 获得所有车辆信息
-    # 目的地的坐标
+
+    # -----------------------------------------
+    # destination and current state of our ego car
+    # -----------------------------------------
     dest_x = X[action_index + 1][3]
     dest_y = X[action_index + 1][4]
-    # print('targeted destination is (%d, %d)' % (dest_x, dest_y))
-    ego_transform = car_ego.get_transform()  # ego的state信息
+
+    ego_transform = car_ego.get_transform()
     p_ox = ego_transform.location.x
     p_oy = ego_transform.location.y
     theta_o = ego_transform.rotation.yaw
     theta_o = theta_o / 180.0 * math.pi
-    # 1 秒钟 创造多少个数据点
-    item_one_Second = 1
-    v_temp = v_j = math.sqrt(car_ego.get_velocity().x ** 2 + car_ego.get_velocity().y ** 2)
-    # 假设ego的速度恒定
-    constant_speed1 = 22
-    constant_speed1 = constant_speed1 / 3.6
 
-    constant_speed2 = 26
+    # -----------------------------------------
+    # create middle way points for our ego car between current location and destination
+    # -----------------------------------------
+    num_second = 1  # TBD
+    constant_speed1 = 22  # relatively low speed
+    constant_speed2 = 26  # relatively high speed
+    constant_speed1 = constant_speed1 / 3.6
     constant_speed2 = constant_speed2 / 3.6
 
-    # 计算ego当前位置和目的地的距离
-    def distance(dest_x, dest_y, p_ox, p_oy):
-        return math.sqrt((dest_x - p_ox) ** 2 + (dest_y - p_oy) ** 2)
+    merge_dist = distance(dest_x, dest_y, p_ox, p_oy)  # distance between current location to destination
+    num_waypoints = round(merge_dist / constant_speed1) * num_second
 
-    action_distance = distance(dest_x, dest_y, p_ox, p_oy)
-    number = round(action_distance / constant_speed1) * item_one_Second  # 以毫秒为单位构造数据
-    # print('we create %d items of points(1秒10个)\n' % number)
-    # ==============================================================================
-    # 利用函数来构造数据
-    futureEgo1 = func_futureEgo(constant_speed1, dest_x, dest_y, p_ox, p_oy, theta_o, number)
-    futureEgo2 = func_futureEgo(constant_speed2, dest_x, dest_y, p_ox, p_oy, theta_o, number)
-    # log.write(
-    #     'constant_speed1 = %0.2f, constant_speed2 = %0.2f, dest_x = %0.2f, dest_y = %0.2f, p_ox = %0.2f, '
-    #     'p_oy = %0.2f, theta_o = %0.2f, number = %d\n' % (
-    #         constant_speed1, constant_speed2, dest_x, dest_y, p_ox, p_oy, theta_o, number))
-    # ==============================================================================
-    # 着手准备计算是ego进行merge lane否会危险
-    pool_p1_value = []  # store p1_value of all other vehicles and then choose the biggest one
-    # 目标lane上是否会有车进行判断
-    # ==============================================================================
-    pool_lane_id = fuc_laneHasCar(action_index, car_ego, world, curr_lane)
-    # ==============================================================================
-    if pool_lane_id:  # lane上有车辆
-        # result = []
-        for lane, vehicle_other in pool_lane_id:
-            each_pool_p1_value1 = []  # store p1_value of all other vehicles and then choose the biggest one
-            each_pool_p1_value2 = []  # store p1_value of all other vehicles and then choose the biggest one
-            # 其他车的state
-            other_transform = vehicle_other.get_transform()
+    # -----------------------------------------
+    # predict future trajectory of our ego car
+    # we create two trajectories because we do not know the speed of our ego car
+    # -----------------------------------------
+    future_trajA_ego = func_future_traj_ego(constant_speed1, dest_x, dest_y, p_ox, p_oy, theta_o, num_waypoints)
+    future_trajB_ego = func_future_traj_ego(constant_speed2, dest_x, dest_y, p_ox, p_oy, theta_o, num_waypoints)
+
+    # -----------------------------------------
+    # get information to compute the risk value
+    # -----------------------------------------
+    pool_risk_other_cars = []  # store p1_value of other cars
+
+    # -----------------------------------------
+    # if there are cars on the target lane of our ego car
+    # -----------------------------------------
+    pool_lane_car = func_lane_has_car(action_index, car_ego, world, curr_lane)
+
+    if pool_lane_car:
+        for lane, car_other in pool_lane_car:
+
+            # -----------------------------------------
+            # get information of other cars
+            # -----------------------------------------
+            other_transform = car_other.get_transform()
             p_jx = other_transform.location.x
             p_jy = other_transform.location.y
-            v_j = math.sqrt(vehicle_other.get_velocity().x ** 2 + vehicle_other.get_velocity().y ** 2)
+            v_j = math.sqrt(car_other.get_velocity().x ** 2 + car_other.get_velocity().y ** 2)
             if v_j >= 15:
                 v_j = v_j / 3.6
             else:
                 v_j = 25.0 / 3.6
-            theta_j = other_transform.rotation.yaw
-            theta_j = theta_j / 180.0 * math.pi
-            acceleration_j = math.sqrt(
-                vehicle_other.get_acceleration().x ** 2 + vehicle_other.get_acceleration().y ** 2)
-            # angular_velocity_j = vehicle_other.get_angular_velocity().z
-            angular_velocity_j = 0  # angular_velocity_j/180.0*math.pi
-            # ==============================================================================
-            # 根据其他车辆的state来，构造未来该车辆的轨迹，与func_futureEgo函数相同。
-            futureOther = func_futureOther(item_one_Second, p_jx, p_jy, v_j, theta_j, acceleration_j,
-                                           angular_velocity_j, number)
-            # log.write(
-            #     'item_one_Second = %d, p_jx = %3.6f, p_jy = %3.6f, v_j = %3.6f, theta_j = %3.6f, acceleration_j = %3.6f, angular_velocity_j = %3.6f, number = %d \n' % (
-            #         item_one_Second, p_jx, p_jy, v_j, theta_j, acceleration_j, angular_velocity_j, number))
-            # ==============================================================================
-            # constant speed 1
-            for i in range(1, number):
-                p_ox = futureEgo1[i][0]
-                p_oy = futureEgo1[i][1]
-                v_o = futureEgo1[i][2]
-                theta_o = futureEgo1[i][3]
-                acceleration_o = futureEgo1[i][4]
-                angular_velocity_o = futureEgo1[i][5]
+            theta_j = other_transform.rotation.yaw / 180.0 * math.pi
+            acceleration_j = math.sqrt(car_other.get_acceleration().x ** 2 + car_other.get_acceleration().y ** 2)
+            angular_velocity_j = 0
 
-                p_jx = futureOther[i][0]
-                p_jy = futureOther[i][1]
-                v_j = futureOther[i][2]
-                theta_j = futureOther[i][3]
-                acceleration_j = futureOther[i][4]
-                angular_velocity_j = futureOther[i][5]
+            # -----------------------------------------
+            # predict trajectory of "other car"
+            # -----------------------------------------
+            future_traj_other = func_future_traj_other(num_second, p_jx, p_jy, v_j, theta_j, acceleration_j,
+                                                       angular_velocity_j, num_waypoints)
 
-                # print('theta_j and theta_o are %f and %f\n' %(theta_o, theta_j))
-                ############################
-                ########## x_o #############
-                ############################
-                fi = D - (p_ox - p_jx) ** 2 - (p_oy - p_jy) ** 2 - alpha * (
-                        (p_ox - p_jx) * (v_o * math.cos(theta_o) - v_j * math.cos(theta_j)) + (p_oy - p_jy) * (
-                        v_o * math.sin(theta_o) - v_j * math.sin(theta_j))) / (
-                             ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
+            # -----------------------------------------
+            # if our ego car takes "constant speed1"
+            # -----------------------------------------
+            pool_p1_value1 = func_compute_risk(future_trajA_ego, future_traj_other, num_waypoints)  # store p1_value of other cars (constant speed 1)
 
-                derivation_pox = -2 * (p_ox - p_jx) - alpha * (-v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) / (
-                        (p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5 + alpha * ((p_ox - p_jx) * (
-                        (p_ox - p_jx) * (-v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) + (p_oy - p_jy) * (
-                        -v_j * math.sin(theta_j) + v_o * math.sin(theta_o)))) / (
-                                         ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 1.5)
+            # -----------------------------------------
+            # if our ego car takes "constant speed2"
+            # -----------------------------------------
+            pool_p1_value2 = func_compute_risk(future_trajB_ego, future_traj_other, num_waypoints)  # store p1_value of other cars (constant speed 2)
 
-                derivation_poy = -2 * (p_oy - p_jy) - alpha * (-v_j * math.sin(theta_j) + v_o * math.sin(theta_o)) / (
-                        (p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5 + alpha * ((p_oy - p_jy) * (
-                        (p_ox - p_jx) * (-v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) + (p_oy - p_jy) * (
-                        -v_j * math.sin(theta_j) + v_o * math.sin(theta_o)))) / (
-                                         ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 1.5)
-
-                derivation_vox = -alpha * ((p_ox - p_jx) * math.cos(theta_o) + (p_oy - p_jy) * math.sin(theta_o)) / (
-                        ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
-
-                derivation_ao = -alpha * (
-                        -v_o * (p_ox - p_jx) * math.sin(theta_o) + v_o * (p_oy - p_jy) * math.cos(theta_o)) / (
-                                        ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
-
-                derivation_o = [derivation_pox, derivation_poy, derivation_vox, derivation_ao]
-                f_xo = [v_o * math.cos(theta_o), v_o * math.sin(theta_o), 0, 0]
-                f_xo = np.transpose(f_xo)
-                B = [[0, 0],
-                     [0, 0],
-                     [1, 0],
-                     [0, 1]]
-                u_o = [acceleration_o, angular_velocity_o]
-                u_o = np.transpose(u_o)
-                derivation_ego_result = np.dot(derivation_o, (f_xo + np.dot(B, u_o)))
-                ############################
-                ########## x_j #############
-                ############################
-                derivation_pjx = 2 * (p_ox - p_jx) - alpha * (v_j * math.cos(theta_j) - v_o * math.cos(theta_o)) / (
-                        (p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5 - alpha * ((p_ox - p_jx) * (
-                        (p_ox - p_jx) * (-v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) + (p_oy - p_jy) * (
-                        -v_j * math.sin(theta_j) + v_o * math.sin(theta_o)))) / (
-                                         ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 1.5)
-
-                derivation_pjy = 2 * (p_oy - p_jy) - alpha * (v_j * math.sin(theta_j) - v_o * math.sin(theta_o)) / (
-                        (p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5 - alpha * ((p_oy - p_jy) * (
-                        (p_ox - p_jx) * (-v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) + (p_oy - p_jy) * (
-                        -v_j * math.sin(theta_j) + v_o * math.sin(theta_o)))) / (
-                                         ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 1.5)
-
-                derivation_vjx = -alpha * (-(p_ox - p_jx) * math.cos(theta_j) - (p_oy - p_jy) * math.sin(theta_j)) / (
-                        ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
-
-                derivation_aj = -alpha * (
-                        v_j * (p_ox - p_jx) * math.sin(theta_j) - v_j * (p_oy - p_jy) * math.cos(theta_j)) / (
-                                        ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
-
-                derivation_j = [derivation_pjx, derivation_pjy, derivation_vjx, derivation_aj]
-
-                f_xj = [v_j * math.cos(theta_j), v_j * math.sin(theta_j), 0, 0]
-                f_xj = np.transpose(f_xj)
-                u_j = [acceleration_j, angular_velocity_j]
-                u_j = np.transpose(u_j)
-                derivation_other_result = np.dot(derivation_j, (f_xj + np.dot(B, u_j)))
-                derivation_fi = derivation_ego_result + derivation_other_result
-                # result.append(
-                # [p_ox, p_oy, p_jx, p_jy, math.sqrt((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2), fi, derivation_fi])
-                # print('k1*x+k2*y<=m')
-                # print('k1 and k2 is')
-                k = np.dot(derivation_o, B)
-                k1 = k[0]
-                k2 = k[1]
-                m = -derivation_other_result - np.dot(derivation_o, f_xo)
-                # print('k1, k2 and m are %f, %f, %f\n' % (k1, k2, m))
-                # solver:
-                if fi > 0 and derivation_fi > -0.5:
-                    right_number = 0
-                    answer_v = 0
-                    answer_theta = 0
-                    wrong_number = 0
-                    # 做一千次sampling就行了
-                    for r in range(1000):
-                        # answer_derivation_v = random.uniform(-15, 15)
-                        answer_derivation_v = random.uniform(0, 10)
-                        # answer_derivation_theta = random.uniform(-0.5, 0.5)
-                        answer_derivation_theta = random.uniform(-0.01, 0.01)
-
-                        if k1 * answer_derivation_v + k2 * answer_derivation_theta < m:
-                            right_number = right_number + 1
-                        else:
-                            wrong_number = wrong_number + 1
-                    p1_value = wrong_number / 1000.0
-                else:
-                    p1_value = 0
-                each_pool_p1_value1.append(p1_value)
-            # constant speed 2
-            for i in range(1, number):
-                p_ox = futureEgo2[i][0]
-                p_oy = futureEgo2[i][1]
-                v_o = futureEgo2[i][2]
-                theta_o = futureEgo2[i][3]
-                acceleration_o = futureEgo2[i][4]
-                angular_velocity_o = futureEgo2[i][5]
-
-                p_jx = futureOther[i][0]
-                p_jy = futureOther[i][1]
-                v_j = futureOther[i][2]
-                theta_j = futureOther[i][3]
-                acceleration_j = futureOther[i][4]
-                angular_velocity_j = futureOther[i][5]
-
-                # print('theta_j and theta_o are %f and %f\n' %(theta_o, theta_j))
-                ############################
-                ########## x_o #############
-                ############################
-                fi = D - (p_ox - p_jx) ** 2 - (p_oy - p_jy) ** 2 - alpha * (
-                        (p_ox - p_jx) * (v_o * math.cos(theta_o) - v_j * math.cos(theta_j)) + (p_oy - p_jy) * (
-                        v_o * math.sin(theta_o) - v_j * math.sin(theta_j))) / (
-                             ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
-
-                derivation_pox = -2 * (p_ox - p_jx) - alpha * (-v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) / (
-                        (p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5 + alpha * ((p_ox - p_jx) * (
-                        (p_ox - p_jx) * (-v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) + (p_oy - p_jy) * (
-                        -v_j * math.sin(theta_j) + v_o * math.sin(theta_o)))) / (
-                                         ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 1.5)
-
-                derivation_poy = -2 * (p_oy - p_jy) - alpha * (-v_j * math.sin(theta_j) + v_o * math.sin(theta_o)) / (
-                        (p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5 + alpha * ((p_oy - p_jy) * (
-                        (p_ox - p_jx) * (-v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) + (p_oy - p_jy) * (
-                        -v_j * math.sin(theta_j) + v_o * math.sin(theta_o)))) / (
-                                         ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 1.5)
-
-                derivation_vox = -alpha * ((p_ox - p_jx) * math.cos(theta_o) + (p_oy - p_jy) * math.sin(theta_o)) / (
-                        ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
-
-                derivation_ao = -alpha * (
-                        -v_o * (p_ox - p_jx) * math.sin(theta_o) + v_o * (p_oy - p_jy) * math.cos(theta_o)) / (
-                                        ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
-
-                derivation_o = [derivation_pox, derivation_poy, derivation_vox, derivation_ao]
-                f_xo = [v_o * math.cos(theta_o), v_o * math.sin(theta_o), 0, 0]
-                f_xo = np.transpose(f_xo)
-                B = [[0, 0],
-                     [0, 0],
-                     [1, 0],
-                     [0, 1]]
-                u_o = [acceleration_o, angular_velocity_o]
-                u_o = np.transpose(u_o)
-                derivation_ego_result = np.dot(derivation_o, (f_xo + np.dot(B, u_o)))
-                ############################
-                ########## x_j #############
-                ############################
-                derivation_pjx = 2 * (p_ox - p_jx) - alpha * (v_j * math.cos(theta_j) - v_o * math.cos(theta_o)) / (
-                        (p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5 - alpha * ((p_ox - p_jx) * (
-                        (p_ox - p_jx) * (-v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) + (p_oy - p_jy) * (
-                        -v_j * math.sin(theta_j) + v_o * math.sin(theta_o)))) / (
-                                         ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 1.5)
-
-                derivation_pjy = 2 * (p_oy - p_jy) - alpha * (v_j * math.sin(theta_j) - v_o * math.sin(theta_o)) / (
-                        (p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5 - alpha * ((p_oy - p_jy) * (
-                        (p_ox - p_jx) * (-v_j * math.cos(theta_j) + v_o * math.cos(theta_o)) + (p_oy - p_jy) * (
-                        -v_j * math.sin(theta_j) + v_o * math.sin(theta_o)))) / (
-                                         ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 1.5)
-
-                derivation_vjx = -alpha * (-(p_ox - p_jx) * math.cos(theta_j) - (p_oy - p_jy) * math.sin(theta_j)) / (
-                        ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
-
-                derivation_aj = -alpha * (
-                        v_j * (p_ox - p_jx) * math.sin(theta_j) - v_j * (p_oy - p_jy) * math.cos(theta_j)) / (
-                                        ((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2) ** 0.5)
-
-                derivation_j = [derivation_pjx, derivation_pjy, derivation_vjx, derivation_aj]
-
-                f_xj = [v_j * math.cos(theta_j), v_j * math.sin(theta_j), 0, 0]
-                f_xj = np.transpose(f_xj)
-                u_j = [acceleration_j, angular_velocity_j]
-                u_j = np.transpose(u_j)
-                derivation_other_result = np.dot(derivation_j, (f_xj + np.dot(B, u_j)))
-                derivation_fi = derivation_ego_result + derivation_other_result
-                # result.append(
-                # [p_ox, p_oy, p_jx, p_jy, math.sqrt((p_ox - p_jx) ** 2 + (p_oy - p_jy) ** 2), fi, derivation_fi])
-                # print('k1*x+k2*y<=m')
-                # print('k1 and k2 is')
-                k = np.dot(derivation_o, B)
-                k1 = k[0]
-                k2 = k[1]
-                m = -derivation_other_result - np.dot(derivation_o, f_xo)
-                # print('k1, k2 and m are %f, %f, %f\n' % (k1, k2, m))
-                # solver:
-                if fi > 0 and derivation_fi > -0.5:
-                    right_number = 0
-                    answer_v = 0
-                    answer_theta = 0
-                    wrong_number = 0
-                    # 做一千次sampling就行了
-                    for r in range(1000):
-                        # answer_derivation_v = random.uniform(-15, 15)
-                        answer_derivation_v = random.uniform(0, 10)
-                        # answer_derivation_theta = random.uniform(-0.5, 0.5)
-                        answer_derivation_theta = random.uniform(-0.01, 0.01)
-
-                        if k1 * answer_derivation_v + k2 * answer_derivation_theta < m:
-                            right_number = right_number + 1
-                        else:
-                            wrong_number = wrong_number + 1
-                    p1_value = wrong_number / 1000.0
-                else:
-                    p1_value = 0
-                each_pool_p1_value2.append(p1_value)
-
-            # print('a set of p1_value 1 for each car is %s \n' % each_pool_p1_value1)
-            # log.write('a set of p1_value 1 for each car is %s \n' % each_pool_p1_value1)
-            # print('a set of p1_value 2 for each car is %s \n' % each_pool_p1_value2)
-            # log.write('a set of p1_value 2 for each car is %s \n' % each_pool_p1_value2)
-            p1_value1 = (statistics.mean(each_pool_p1_value1) + max(each_pool_p1_value1)) * 0.5
-            p1_value2 = (statistics.mean(each_pool_p1_value2) + max(each_pool_p1_value2)) * 0.5
+            # -----------------------------------------
+            # combine "pool_p1_value1" and "pool_p1_value2" together
+            # -----------------------------------------
+            p1_value1 = (statistics.mean(pool_p1_value1) + max(pool_p1_value1)) * 0.5
+            p1_value2 = (statistics.mean(pool_p1_value2) + max(pool_p1_value2)) * 0.5
             p1_value = max(p1_value1, p1_value2)
-            pool_p1_value.append(p1_value)
-    else:
-        print('targeted lane does not have a car, so pool_p1_value is empty\n')
+            pool_risk_other_cars.append(p1_value)
 
-    # print('p1_value for total cars is %s\n' % pool_p1_value)
-
-    if pool_p1_value:
-        p1_value = max(pool_p1_value)
+    # -----------------------------------------
+    # output the maximal risk value
+    # -----------------------------------------
+    if pool_risk_other_cars:
+        p1_value = max(pool_risk_other_cars)
     else:
         p1_value = 0
-        # log.write('no car around！\n')
+
     return p1_value
 
 
-def func_futureEgo(constant_speed, dest_x, dest_y, p_ox, p_oy, theta_o, number):
-    temp = []
-    temp.append((p_ox, p_oy, 0, theta_o, 0, 0))
-    for i in range(1, number):
-        mp_ox = p_ox + i * (dest_x - p_ox) / number
-        mp_oy = p_oy + i * (dest_y - p_oy) / number
+def func_future_traj_ego(constant_speed, dest_x, dest_y, p_ox, p_oy, theta_o, num_waypoints):
+    temp = [(p_ox, p_oy, 0, theta_o, 0, 0)]
+    for i in range(1, num_waypoints):
+        mp_ox = p_ox + i * (dest_x - p_ox) / num_waypoints
+        mp_oy = p_oy + i * (dest_y - p_oy) / num_waypoints
         mv_o = constant_speed
         mtheta_o = theta_o
         macceleration_o = 0
@@ -691,47 +614,60 @@ def func_futureEgo(constant_speed, dest_x, dest_y, p_ox, p_oy, theta_o, number):
     return temp
 
 
-def func_futureOther(item_one_Second, p_jx, p_jy, v_j, theta_j, acceleration_j, angular_velocity_j, number):
-    temp = []
-    temp.append((p_jx, p_jy, v_j, theta_j, acceleration_j, angular_velocity_j))
-    for i in range(1, number):
-        mp_jx = p_jx + (i / item_one_Second) * v_j * math.cos(theta_j)
-        mp_jy = p_jy + (i / item_one_Second) * v_j * math.sin(theta_j)
+def func_future_traj_other(num_second, p_jx, p_jy, v_j, theta_j, acceleration_j, angular_velocity_j, num_waypoints):
+    temp = [(p_jx, p_jy, v_j, theta_j, acceleration_j, angular_velocity_j)]
+    for i in range(1, num_waypoints):
+        mp_jx = p_jx + (i / num_second) * v_j * math.cos(theta_j)
+        mp_jy = p_jy + (i / num_second) * v_j * math.sin(theta_j)
         mv_j = v_j
         mtheta_j = theta_j
         macceleration_j = 0
         mangular_velocity_j = 0
         temp.append((mp_jx, mp_jy, mv_j, mtheta_j, macceleration_j, mangular_velocity_j))
-        # print('other写入txt文件\n')
     return temp
 
 
-def fuc_laneHasCar(action_index, car_ego, world, curr_lane):
-    pool_lane_id = []
+def func_lane_has_car(action_index, car_ego, world, curr_lane):
+    # -----------------------------------------
+    # sub functions
+    # -----------------------------------------
+    def fuc_findLane(x, y):
+        matrix_temp = np.load(address1 + 'interaction/matrix.npy')
+        matrix_temp[:, 2] = matrix_temp[:, 2] - x
+        matrix_temp[:, 3] = matrix_temp[:, 3] - y
+        a = np.power(matrix_temp[:, 2], 2)
+        b = np.power(matrix_temp[:, 3], 2)
+        result = a + b
+        index = np.argmin(result)
+        return matrix_temp[index, 5]
+
+    def fuc_dist_ego_other(car_ego, car_other):
+        return math.sqrt((car_ego.get_location().x - car_other.get_location().x) ** 2 + (
+                    car_ego.get_location().y - car_other.get_location().y) ** 2)
+
+    # -----------------------------------------
+    # return "lane id" and "car id"
+    # -----------------------------------------
+    pool_lane_car = []
+
+    cars = world.get_actors().filter('vehicle.*')
+
     dest_x = X[action_index + 1][3]
     dest_y = X[action_index + 1][4]
-    vehicles = world.get_actors().filter('vehicle.*')
-    # ==============================================================================
-    # 输入目的地，获得目标lane的id，这个步骤可以后续加速，全局搜索太慢！
-    target_lane_id = fuc_findLane(dest_x, dest_y)
 
-    # print('######################################')
+    other_car_qualified = []  # designed to filter some repeated cars
 
-    # ==============================================================================
-    def distance_case1(l):
-        return math.sqrt((dest_x - l.x) ** 2 + (dest_y - l.y) ** 2)
+    # -----------------------------------------
+    # if world has > 1 cars
+    # -----------------------------------------
+    if len(cars) > 1:
+        lane_id_ego = curr_lane  # current lane id
 
-    def distance_case2(car_ego, l):
-        return math.sqrt((car_ego.get_location().x - l.x) ** 2 + (car_ego.get_location().y - l.y) ** 2)
-
-    recorded_car = []  # designed to filter some repeated cars
-    if len(vehicles) > 1:
-        lane_id_ego = curr_lane
-        # log.write('lane_id_ego is %d\n' % lane_id_ego)
+        # -----------------------------------------
+        # find which lane can let car to merge
+        # mergelane.npy stores [lane1, lane2], where car can merge left from lane1 to lane 2
+        # -----------------------------------------
         mergelane = np.load(address1 + 'interaction/mergelane.npy')
-        location = np.where(mergelane == lane_id_ego)
-        result = mergelane[location[0]]
-        # print(result[0][0])
         location = np.where(mergelane == lane_id_ego)
         row = location[0][0]
         col = location[1][0]
@@ -739,69 +675,38 @@ def fuc_laneHasCar(action_index, car_ego, world, curr_lane):
             col = 1
         else:
             col = 0
-        right_lane_id_other = mergelane[row][col]
-        # log.write('lane_id_other should be %d\n' % right_lane_id_other)
-        # print('lane_id_other should be %d\n' % right_lane_id_other)
+        lane_beside = mergelane[row][col]
 
-        right_direction = car_ego.get_transform().rotation.yaw
-        # log.write('right_direction +- 60 is %d\n' % right_direction)
+        car_ego_yaw = car_ego.get_transform().rotation.yaw  # road direction
 
-        vehicles_case = [(distance_case2(car_ego, x.get_location()), x) for x in vehicles if
-                         x.id != car_ego.id]
-        for d, vehicle in sorted(vehicles_case):
-            if d > 30.0:
+        # -----------------------------------------
+        # compute the distance between our ego car and other cars
+        # -----------------------------------------
+        pool_other_cars = [(fuc_dist_ego_other(car_ego, car), car) for car in cars if car.id != car_ego.id]
+
+        for d, car in sorted(pool_other_cars):
+            if d > 30.0:  # if a "other car" is far from our ego car, do not consider it
                 break
-            # print('d is %d' % d)
-            other_direction = vehicle.get_transform().rotation.yaw
-            # print('other direction is %d' % other_direction)
-            if abs(right_direction - other_direction) > 60:
+
+            other_direction = car.get_transform().rotation.yaw
+            if abs(car_ego_yaw - other_direction) > 60.:  # if the angle between "other car" and our ego car, do not consider it
                 break
-            lane_id_other = fuc_findLane(vehicle.get_location().x, vehicle.get_location().y)  # 很可能是错的,缺少一些car！
-            # print('可能车辆的位置信息 x = %f, y = %f \n' %(vehicle.get_location().x, vehicle.get_location().y))
-            # log.write('可能车辆的位置信息 x = %f, y = %f \n' % (vehicle.get_location().x, vehicle.get_location().y))
-            # print('abs(right_direction - other_direction) is %d\n' % abs(right_direction - other_direction))
-            # log.write('abs(right_direction - other_direction) is %d\n' % abs(right_direction - other_direction))
-            # print('可能的lane_id_other is %d\n' % lane_id_other)
-            # log.write('可能的lane_id_other is %d\n' % lane_id_other)
-            if (lane_id_other == right_lane_id_other) and (vehicle.id not in recorded_car):
-                pool_lane_id.append([lane_id_other, vehicle])
-                recorded_car.append(vehicle.id)
-            # 如果lane_other 不属于right_lane_id_other, 也不属于currentlane，说明很奇怪！
-            if (lane_id_other != right_lane_id_other) and (lane_id_other != curr_lane) and (
-                    vehicle.id not in recorded_car):
-                pool_lane_id.append([lane_id_other, vehicle])
-                recorded_car.append(vehicle.id)
-                # print('出现了异常case！')
 
-    if pool_lane_id:
-        # print('pool_lane_id is not empty\n')
-        # print('we need consider %d cars\n' % len(pool_lane_id))
-        # log.write('we need consider %d cars\n' % len(pool_lane_id))
-        return pool_lane_id
-    else:
-        # print('pool_lane_id is empty\n')
-        return []
+            # -----------------------------------------
+            # find qualified "other car"
+            # -----------------------------------------
+            lane_id_other = fuc_findLane(car.get_location().x, car.get_location().y)
 
+            if (lane_id_other == lane_beside) and (car.id not in other_car_qualified):
+                pool_lane_car.append([lane_id_other, car])
+                other_car_qualified.append(car.id)
 
-def fuc_findLane(x, y):
-    matrix_temp = np.load(address1 + 'interaction/matrix.npy')
-    # for item in range(len(matrix_temp)): test.write('%d, %d, %f, %f, %f, %d\n' % (matrix_temp[item][0],
-    # matrix_temp[item][1], matrix_temp[item][2], matrix_temp[item][3], matrix_temp[item][4], matrix_temp[item][5]))
-    # test.write('$$$$$$$$$$$$$$$$$$$$$$$')
-    matrix_temp[:, 2] = matrix_temp[:, 2] - x
-    matrix_temp[:, 3] = matrix_temp[:, 3] - y
-    a = np.power(matrix_temp[:, 2], 2)
-    b = np.power(matrix_temp[:, 3], 2)
-    result = a + b
-    # print(result[1])
-    # for item in range(len(matrix_temp)):
-    # test.write('%d, %d, %f, %f, %d\n' % (x, y, matrix_temp[item][2], matrix_temp[item][3], result[item]))
-    # test.write('#######################')
-    index = np.argmin(result)
-    # index = np.where(result == np.max(result))
-    # print(index)
-    # print('x is %f y is %f find the lane information %d (index)' % (x, y, index))
-    return matrix_temp[index, 5]
+            if (lane_id_other != lane_beside) and (lane_id_other != curr_lane) and (car.id not in other_car_qualified):
+                pool_lane_car.append([lane_id_other, car])
+                other_car_qualified.append(car.id)
+                print('an unexpected case! please check here')
+
+    return pool_lane_car
 
 
 # ==============================================================================
