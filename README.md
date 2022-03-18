@@ -26,7 +26,7 @@ If you use this code, please cite our following paper
         SoftRainNoon, SoftRainSunset, WetCloudyNoon, WetCloudySunset,
         WetNoon, WetSunset
 * change town map
-  * some weather to select: Town01, Town02, Town03, Town04, Town05
+  * some map to select: Town01, Town02, Town03, Town04, Town05
 #### prerequisite: run ./CarlaUE4.sh
 #### input: None
 #### output: None
